@@ -1,0 +1,3 @@
+# Large raw survey files - reproducible from source, not tracked in Git.
+# schema.csv (small, documents schema evolution) IS tracked on purpose.
+data/raw/**/results.csv
