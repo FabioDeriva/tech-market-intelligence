@@ -155,3 +155,32 @@ pip freeze > requirements.txt
 `pip install pandas` trouxe automaticamente as dependências do próprio pandas (`numpy`, `python-dateutil`, `six`, `tzdata`) — resolução de árvore de dependências feita pelo `pip`. `pip freeze` lista tudo que está instalado no ambiente ativo com a versão exata, redirecionado para `requirements.txt` — arquivo que permite qualquer pessoa (ou você, em outra máquina) recriar o ambiente idêntico com um único comando (`pip install -r requirements.txt`), sem precisar adivinhar versões.
 
 **Por que `venv/` também vai para o `.gitignore`:** mesma lógica do `results.csv` — grande, específico da máquina (caminhos absolutos internos) e 100% reproduzível a partir do `requirements.txt`. Nunca se commita o ambiente, só a receita para recriá-lo.
+
+---
+
+## 1.5 — 2026-08-21 — Primeiro script real: `src/validation/schema_profile.py`
+
+**Fundamentos de Python revisados na prática:** blocos definidos por `:` + indentação (não `{ }` como em C/Java/JS); `for x in range(a, b):` (limite superior exclusivo) em vez de `while` com contador manual; f-strings (`f"texto {variavel}"`) para montar caminhos dinâmicos; dicionários (`{}`, `dict[chave] = valor`, `.items()` para iterar chave+valor); **dict comprehension** (`{chave: transformação for chave, valor in algo.items()}`) como forma compacta de construir um dicionário novo a partir de outro.
+
+**Conceito: `DataFrame` do pandas.** Estrutura de tabela em memória (linhas + colunas rotuladas), devolvida por `pd.read_csv(caminho)`. `nrows=N` no `read_csv` lê só as N primeiras linhas sem carregar o arquivo inteiro — essencial para espiar arquivos grandes (100+ MB) sem gastar memória à toa.
+
+**Profiling dos 6 `schema.csv` — achado real de schema evolution, não hipotético:**
+```
+2020        (61, 2)  colunas: ['Column', 'QuestionText']
+2021–2024   (~48-87, 6)  colunas: ['qid', 'qname', 'question', 'force_resp', 'type', 'selector']
+2025        (139, 6)  colunas: ['qid', 'qname', 'question', 'type', 'sub', 'sq_id']
+```
+**Não são 2 formatos, são 3** — 2021-2024 têm as mesmas 6 colunas entre si, mas 2025 trocou `force_resp`/`selector` por `sub`/`sq_id`. Checar só a *contagem* de colunas (6 == 6) teria escondido essa mudança; só comparar os *nomes* revelou.
+
+**Decisão de normalização:** mapear para um contrato canônico mínimo — `question_code` (de `qname`/`Column`) e `question_text` (de `question`/`QuestionText`) — as duas únicas colunas semanticamente equivalentes nos 3 formatos. `type`, `force_resp`, `selector`, `sub`, `sq_id` ficam de fora deliberadamente: não têm correspondência 1:1 entre todos os anos (ex.: `force_resp` e `sub` são conceitos diferentes, não a mesma coisa renomeada), e nenhuma métrica do projeto depende deles hoje. Regra aplicada: normalizar só o que atende uma necessidade concreta já identificada, não especular.
+
+```python
+def normalize_schema(df, ano):
+    if ano == 2020:
+        df = df.rename(columns={"Column": "question_code", "QuestionText": "question_text"})
+    else:
+        df = df.rename(columns={"qname": "question_code", "question": "question_text"})
+    return df[["question_code", "question_text"]]
+```
+
+**Espiada no `results.csv` de 2025** (via `nrows=5`, sem carregar os 140 MB inteiros): mais de 150 colunas — uma por pergunta do questionário. Confirma visualmente o padrão de "sub-pergunta" identificado no schema (`TechEndorse_1` a `TechEndorse_13`, `JobSatPoints_1` a `JobSatPoints_16` — uma coluna por opção de resposta de perguntas de múltipla escolha). Colunas-chave já localizadas para as métricas do projeto: `ConvertedCompYearly` (salário anual convertido, provavelmente para USD) e `LanguageHaveWorkedWith` (linguagens usadas).
