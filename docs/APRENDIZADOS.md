@@ -2,12 +2,18 @@
 
 > Log incremental de decisões técnicas e conceitos aprendidos durante a construção do projeto.
 > Serve de matéria-prima para o README final e para posts de LinkedIn.
+> Organizado por **etapa**, seguindo a ordem de construção degrau a degrau definida no início do projeto.
 
 ---
 
-## 2026-08-20 — Setup do ambiente e estrutura de pastas
+# ETAPA 1 — Python Puro + PostgreSQL
 
-**Contexto:** primeiro contato com o projeto, degrau 1 (Python puro + Postgres) ainda não começou o código.
+> Degrau 1 do roadmap: ingestão dos surveys, profiling de schema, normalização, carga no Postgres. Sem dbt, sem Docker ainda.
+> **Status:** em andamento. Concluído até aqui: ambiente, controle de versão, dados brutos, ambiente virtual Python. Pendente: profiling/schema evolution, script de ingestão, modelagem e carga no Postgres.
+
+## 1.1 — 2026-08-20 — Setup do ambiente e estrutura de pastas
+
+**Contexto:** primeiro contato com o projeto, degrau 1 ainda não começou o código.
 
 **O que foi verificado:**
 - Python 3.14.7 instalado corretamente (instalação real em `AppData\Local\Programs\Python`, não o stub da Microsoft Store).
@@ -18,28 +24,27 @@
 - `data/raw/` — ZIPs/CSVs originais dos surveys. **Nunca editado.** É a fonte da verdade; se uma transformação tiver bug, refaz-se a partir daqui.
 - `data/staging/` — dados extraídos, ainda "crus" em significado, mas em formato utilizável.
 - `src/ingestion/`, `src/transformation/`, `src/validation/`, `src/analytics/` — um módulo por responsabilidade (princípio de separação de responsabilidades). Evita virar um notebook monolítico de 400 células.
+- Esse padrão (Raw → Staging → Intermediate → Gold, um pipeline de mão única) tem nome na indústria: **Medallion Architecture** (Bronze/Silver/Gold na nomenclatura da Databricks). Dado nunca flui de volta pra uma camada anterior — garante que um bug numa transformação nunca corrompe a fonte, e que cada camada tem um contrato claro do que promete entregar.
+- A divisão de `sql/` em `staging/intermediate/marts` já imita a convenção de pastas do **dbt** (degrau 3) — o modelo mental já fica pronto antes mesmo de aprender a ferramenta.
 
 **Conceito aprendido — Git não versiona pastas vazias:**
 Git rastreia conteúdo (blobs), não estrutura de diretórios. Uma pasta sem nenhum arquivo dentro simplesmente não aparece em `git status` nem é commitada. Solução comum: colocar um arquivo `.gitkeep` (convenção, não é uma feature nativa do Git) dentro de pastas que ainda estão vazias, só para dar a elas um arquivo para rastrear.
-
-**Comando usado para criar a árvore de pastas (PowerShell):**
-```powershell
-New-Item -ItemType Directory -Force -Path data/raw, data/staging, src/ingestion, src/transformation, src/validation, src/analytics, sql/staging, sql/intermediate, sql/marts, tests
-```
 
 **Por que não dá pra commitar uma pasta vazia (não é limitação artificial, é o modelo interno do Git):**
 O Git só tem dois tipos de objeto relevantes aqui — `blob` (conteúdo de um arquivo) e `tree` (lista de entradas, cada uma apontando pra um blob ou outra tree). Uma entrada de tree sempre precisa apontar pra algo. Uma pasta vazia não tem nada pra apontar, então não existe objeto a ser criado — `git add` numa pasta vazia não tem o que registrar.
 
 `.gitkeep` **não é uma feature do Git** — é convenção da comunidade: um arquivo qualquer, vazio, só para a pasta deixar de estar vazia e se tornar rastreável. O nome não tem significado especial para o Git.
 
-**Comando para criar os `.gitkeep`:**
+**Comandos usados (PowerShell):**
 ```powershell
+New-Item -ItemType Directory -Force -Path data/raw, data/staging, src/ingestion, src/transformation, src/validation, src/analytics, sql/staging, sql/intermediate, sql/marts, tests
+
 "data/raw", "data/staging", "src/ingestion", "src/transformation", "src/validation", "src/analytics", "sql/staging", "sql/intermediate", "sql/marts", "tests" | ForEach-Object { New-Item -ItemType File -Force -Path "$_/.gitkeep" }
 ```
 
 ---
 
-## 2026-08-20 (cont.) — Primeira surpresa real: a fonte de dados mudou de formato
+## 1.2 — 2026-08-20 — Primeira surpresa real: a fonte de dados mudou de formato
 
 **O plano original** (documento de contexto do projeto) previa baixar ZIPs contendo CSVs do site oficial `survey.stackoverflow.co`. **A realidade encontrada:** o Stack Overflow migrou a distribuição dos dados para um repositório GitHub (`StackExchange/Survey`), com um CSV puro por ano, hospedado via **Git LFS** (Large File Storage — mecanismo do Git para versionar arquivos grandes sem inchar o histórico do repositório).
 
@@ -47,16 +52,21 @@ O Git só tem dois tipos de objeto relevantes aqui — `blob` (conteúdo de um a
 
 **Impacto prático:** como os dados já vêm em CSV puro (sem ZIP), a etapa de ingestão fica mais simples — não é necessário código de extração de ZIP, só leitura direta de CSV.
 
+**Dois arquivos por ano, papéis diferentes:**
+- `results.csv` — o dado de verdade, uma linha por resposta.
+- `schema.csv` — o dicionário de dados: o que cada coluna do `results.csv` significa. Peça central para provar schema evolution entre anos.
+
 **URLs diretas dos 6 anos usados no projeto (2020–2025):**
 ```
 https://github.com/StackExchange/Survey/raw/refs/heads/main/packages/archive/{ano}/results.csv
+https://github.com/StackExchange/Survey/raw/refs/heads/main/packages/archive/{ano}/schema.csv
 ```
 
-**Convenção de armazenamento no raw:** `data/raw/{ano}/results.csv` — um subdiretório por ano, mantendo a fonte auditável e o layout previsível para o script de ingestão.
+**Convenção de armazenamento no raw:** `data/raw/{ano}/results.csv` e `data/raw/{ano}/schema.csv` — um subdiretório por ano, mantendo a fonte auditável e o layout previsível para o script de ingestão. Nomes de arquivo mantidos **idênticos ao original** (sem incluir o ano no nome) — a pasta já desambigua, e preservar o nome original da fonte é boa prática de rastreabilidade na camada raw.
 
 ---
 
-## 2026-08-21 — Git: por que dado bruto não é versionado, `.gitignore`, e disciplina de commit
+## 1.3 — 2026-08-21 — Git: por que dado bruto não é versionado, `.gitignore`, e disciplina de commit
 
 **Contexto:** ao baixar os 6 anos do survey, `results.csv` variou entre 80 MB e 160 MB por ano — 4 dos 6 arquivos já estouram o limite de 100 MB do GitHub por push.
 
@@ -71,16 +81,17 @@ https://github.com/StackExchange/Survey/raw/refs/heads/main/packages/archive/{an
 # Large raw survey files - reproducible from source, not tracked in Git.
 # schema.csv (small, documents schema evolution) IS tracked on purpose.
 data/raw/**/results.csv
+venv/
 ```
 
-**Conceito: caminho completo, não nome, identifica um arquivo.** É possível (e correto) ter `data/raw/2020/results.csv` e `data/raw/2025/results.csv` com o mesmo nome — a pasta já desambigua. Renomear pra `results2025.csv` seria redundante (o ano já está codificado na pasta) e vai contra a boa prática de **manter o nome original do arquivo na camada raw**, que existe para preservar rastreabilidade até a fonte.
+**Conceito: caminho completo, não nome, identifica um arquivo.** É possível (e correto) ter `data/raw/2020/results.csv` e `data/raw/2025/results.csv` com o mesmo nome — a pasta já desambigua.
 
 **Os três estados do Git (fluxo básico):**
 ```
 diretório de trabalho  →  área de staging (index)  →  commit
      (git status olha aqui)   (git add move pra cá)      (git commit grava aqui)
 ```
-`git status` é somente leitura — não precisa (nem faz sentido) rodar `git add` antes dele. Ele é o check-point de segurança que se roda **antes de qualquer commit**, para confirmar exatamente o que vai virar histórico permanente.
+`git status` é somente leitura — não precisa (nem faz sentido) rodar `git add` antes dele. É o check-point de segurança que se roda **antes de qualquer commit**, para confirmar exatamente o que vai virar histórico permanente. Um arquivo só aparece em `git status` quando tem diferença em relação ao último commit (novo, modificado ou removido) — o `.gitignore` não é especial nesse sentido, é um arquivo de texto versionado como qualquer outro.
 
 **`git add .` / `git add -A` vs. listar caminhos explícitos:** ambos respeitam o `.gitignore`, então no dia a dia costumam dar no mesmo resultado. Mas `git add .` confia cegamente nas regras de ignore — se algo sensível (`.env`, credencial, arquivo grande) não estiver no `.gitignore` por esquecimento, ele entra silenciosamente no staging. Listar caminhos à mão força uma decisão consciente sobre o que está indo pro commit. Hábito recomendado em projeto novo, ainda calibrando o `.gitignore`.
 
@@ -95,6 +106,52 @@ diretório de trabalho  →  área de staging (index)  →  commit
 | `refactor` | Reorganiza código existente, sem mudar comportamento |
 | `test` | Só testes |
 
-Commit de `.gitignore` + `schema.csv` + diário foi classificado como `chore`, não `feat`, porque nenhum dos arquivos entrega uma capacidade nova ao sistema — é configuração e dado bruto, não comportamento. `feat` fica reservado para quando o primeiro script de ingestão realmente fizer o sistema "ler CSV e carregar no banco" pela primeira vez.
+Commits de infraestrutura (`.gitignore`, `schema.csv`, `requirements.txt`) foram classificados como `chore`, não `feat`, porque nenhum entrega uma capacidade nova ao sistema — é configuração e dado bruto, não comportamento. `feat` fica reservado para quando o primeiro script de ingestão realmente fizer o sistema "ler CSV e carregar no banco" pela primeira vez.
 
 **Decisão de idioma:** commits, código e README em inglês (convenção de mercado); `docs/APRENDIZADOS.md` em português (matéria-prima para conteúdo de LinkedIn).
+
+---
+
+## 1.4 — 2026-08-21 — Ambiente virtual Python (`venv`) e gerenciamento de dependências
+
+**O conceito, antes da ferramenta:** instalar bibliotecas com `pip install` por padrão afeta o Python **global** da máquina. Isso quebra quando dois projetos precisam de versões diferentes da mesma biblioteca. Um **ambiente virtual** é uma cópia isolada do Python — interpretador + pacotes próprios — restrita a um projeto, sem interferir no resto da máquina.
+
+**`venv` vs `Conda`:** `venv` vem embutido na biblioteca padrão do Python (não precisa instalar nada) e gerencia só pacotes Python via `pip` — suficiente para esse projeto (pandas, driver de Postgres, pytest, nada de binário exótico tipo CUDA). `Conda` é mais pesado, usado em ciência de dados/ML quando há dependências não-Python complexas. Times de **engenharia de dados/backend** normalmente usam `venv`/`pip` (ou `poetry`); `Conda` é mais associado a notebook de ML — escolher `venv` sinaliza o perfil profissional certo pro portfólio.
+
+**Criar o ambiente:**
+```powershell
+python -m venv venv
+```
+Sintaxe: `-m venv` roda o **módulo** `venv` da biblioteca padrão; o segundo `venv` é só um **argumento** — o nome da pasta a criar. É coincidência de convenção, não obrigação de sintaxe (poderia ser `python -m venv qualquer_nome`).
+
+**Ativar o ambiente — um script por tipo de shell**, porque "ativar" significa mexer em variáveis de ambiente (como o `PATH`), e cada shell tem sua própria sintaxe:
+
+| Arquivo | Shell |
+|---|---|
+| `Activate.ps1` | PowerShell (prompt `PS ...>`) |
+| `activate.bat` | Prompt de Comando clássico (`cmd.exe`) |
+| `activate` | Bash/Zsh (Linux, Mac, Git Bash) |
+| `activate.fish` | Fish shell |
+
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+Sinal de sucesso: o prompt ganha o prefixo `(venv)`.
+
+**Obstáculo real encontrado — Execution Policy do PowerShell:** por padrão, o PowerShell bloqueia a execução de qualquer script `.ps1`, inclusive inofensivos, como proteção contra scripts maliciosos baixados da internet. Solução:
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+- `-Scope CurrentUser`: afeta a conta de usuário do Windows inteira (todos os projetos, não só esse), não precisa de admin. Não existe (nem faria sentido existir) uma execution policy "por projeto" — é configuração de sistema operacional, feita uma única vez na vida do desenvolvedor.
+- `RemoteSigned`: scripts locais (criados na própria máquina, como o do `venv`) rodam livremente; scripts baixados da internet continuam bloqueados sem assinatura digital. Segurança preservada, não desligada.
+
+**Importante: o venv não isola o terminal inteiro, só as ferramentas Python.** `git` e outros programas continuam funcionando normalmente com `(venv)` ativo — o venv só reescreve a parte do `PATH` que aponta para `python`/`pip`.
+
+**Instalar biblioteca e travar versões:**
+```powershell
+pip install pandas
+pip freeze > requirements.txt
+```
+`pip install pandas` trouxe automaticamente as dependências do próprio pandas (`numpy`, `python-dateutil`, `six`, `tzdata`) — resolução de árvore de dependências feita pelo `pip`. `pip freeze` lista tudo que está instalado no ambiente ativo com a versão exata, redirecionado para `requirements.txt` — arquivo que permite qualquer pessoa (ou você, em outra máquina) recriar o ambiente idêntico com um único comando (`pip install -r requirements.txt`), sem precisar adivinhar versões.
+
+**Por que `venv/` também vai para o `.gitignore`:** mesma lógica do `results.csv` — grande, específico da máquina (caminhos absolutos internos) e 100% reproduzível a partir do `requirements.txt`. Nunca se commita o ambiente, só a receita para recriá-lo.
