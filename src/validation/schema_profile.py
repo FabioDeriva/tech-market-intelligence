@@ -18,3 +18,11 @@ print(schemas_normalizados[2025].head())
 
 for ano, df in schemas_normalizados.items():
     print(ano, df.columns.tolist())
+
+
+codigos_por_ano = {ano: set(df["question_code"]) for ano, df in schemas_normalizados.items()}
+
+listas_de_codigos = list(codigos_por_ano.values())
+nucleo_estavel = listas_de_codigos[0].intersection(*listas_de_codigos[1:])
+
+print(nucleo_estavel)

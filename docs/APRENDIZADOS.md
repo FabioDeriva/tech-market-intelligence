@@ -6,6 +6,26 @@
 
 ---
 
+## Guia rápido de sintaxe Python (consulta, cresce conforme aparece coisa nova)
+
+| Símbolo / termo | O que é | Exemplo |
+|---|---|---|
+| `[]` | **Lista** — coleção ordenada, permite duplicatas, acessa por posição (`lista[0]`) | `[1, 2, 2, 3]` |
+| `{}` com `chave: valor` | **Dicionário** — pares chave→valor, acessa por chave (`dic["ano"]`) | `{"2020": 61, "2021": 48}` |
+| `{}` só com valores | **Set** — coleção sem ordem e **sem duplicatas**, usada pra comparar (união, interseção, diferença) | `{1, 2, 3}` |
+| `()` | **Tupla** (parecida com lista, mas imutável) ou chamada de função | `pd.read_csv(...)` |
+| `:` no fim de `for`/`if`/`def`/`while` | Abre um **bloco** — tudo indentado abaixo pertence a ele. Python usa indentação, não `{ }` | `for x in y:` |
+| `f"texto {variavel}"` | **f-string** — insere valor de variável dentro de um texto | `f"data/raw/{ano}/schema.csv"` |
+| `*lista` | **Unpacking** — "espalha" os itens de uma lista como argumentos separados | `func(*[1,2,3])` = `func(1,2,3)` |
+| `.items()` | Percorre um dicionário pegando **chave e valor** ao mesmo tempo | `for k, v in dic.items():` |
+| `{k: v for k, v in x}` | **Dict comprehension** — constrói um dicionário novo a partir de outro, numa linha só | — |
+| `a & b` / `.intersection()` | **Interseção de sets** — só o que está em **todos** ao mesmo tempo (mais restritivo) | — |
+| `a \| b` / `.union()` | **União de sets** — tudo que está em **qualquer um** deles (menos restritivo) | — |
+| `a - b` | **Diferença de sets** — o que está em `a` mas não em `b` | — |
+| `.str.contains("x")` | Filtro de texto em coluna do pandas — parecido com `LIKE '%x%'` do SQL | `df[df["col"].str.contains("x")]` |
+
+---
+
 # ETAPA 1 — Python Puro + PostgreSQL
 
 > Degrau 1 do roadmap: ingestão dos surveys, profiling de schema, normalização, carga no Postgres. Sem dbt, sem Docker ainda.
@@ -184,3 +204,28 @@ def normalize_schema(df, ano):
 ```
 
 **Espiada no `results.csv` de 2025** (via `nrows=5`, sem carregar os 140 MB inteiros): mais de 150 colunas — uma por pergunta do questionário. Confirma visualmente o padrão de "sub-pergunta" identificado no schema (`TechEndorse_1` a `TechEndorse_13`, `JobSatPoints_1` a `JobSatPoints_16` — uma coluna por opção de resposta de perguntas de múltipla escolha). Colunas-chave já localizadas para as métricas do projeto: `ConvertedCompYearly` (salário anual convertido, provavelmente para USD) e `LanguageHaveWorkedWith` (linguagens usadas).
+
+---
+
+## 1.6 — 2026-08-21 — Comparando os 6 anos com `set()`: o "núcleo estável" de perguntas
+
+**Conceito: `set()`.** Coleção sem ordem e sem duplicatas, com três operações principais: `&`/`.intersection()` (o que está em **todos** ao mesmo tempo — mais restritivo), `|`/`.union()` (o que está em **qualquer um** — menos restritivo), `-` (o que está num mas não no outro). Erro comum cometido e corrigido na prática: confundir união com interseção — testado com um exemplo de brinquedo (`a={1,2,3}`, `b={2,3,4}`, `c={3,4,5}`) até fechar que só o `3` (presente nos três ao mesmo tempo) é a interseção; `{1,2,3,4,5}` seria a união.
+
+**Pipeline construído:**
+```python
+codigos_por_ano = {ano: set(df["question_code"]) for ano, df in schemas_normalizados.items()}
+listas_de_codigos = list(codigos_por_ano.values())
+nucleo_estavel = listas_de_codigos[0].intersection(*listas_de_codigos[1:])
+```
+`list(dic.values())` transforma os 6 sets guardados no dicionário numa lista indexável; `*lista[1:]` espalha "todos menos o primeiro" como argumentos separados para `.intersection()`.
+
+**Resultado — só 14 códigos de pergunta sobrevivem idênticos nos 6 anos (2020–2025):**
+```
+SOAccount, YearsCode, SOVisitFreq, Employment, CompTotal, SOPartFreq,
+Country, DevType, OpSys, OrgSize, EdLevel, SOComm, MainBranch, Age
+```
+**Por que o número é baixo e isso é esperado, não bug:** a interseção nunca passa do menor set (2020 já tem só 61 códigos no total); e boa parte das perguntas restantes são sub-opções de múltipla escolha (`TechEndorse_N`, `AIAgent*`) que a Stack Overflow renomeia/renumera com frequência a cada redesign do survey. O núcleo de 14 é composto majoritariamente por perguntas demográficas/estruturais básicas — exatamente o que se esperaria ser mais estável ano a ano.
+
+**Achado crítico para o projeto:** `LanguageHaveWorkedWith` (a pergunta mais importante do projeto — linguagens usadas) **não está** no núcleo estável — o nome dessa coluna mudou em algum(ns) dos 6 anos. Vai precisar de mapeamento manual específico, ano a ano, assim como possivelmente `ConvertedCompYearly` (salário convertido — `CompTotal`, o valor bruto não convertido, está estável, mas o convertido ainda não foi checado).
+
+**Próximo passo planejado:** usar `.str.contains("Language", case=False)` (filtro de texto em coluna do pandas, equivalente a `LIKE '%Language%'` do SQL) para caçar, em cada ano, qual(is) código(s) de pergunta correspondem a linguagem — e repetir para salário.
