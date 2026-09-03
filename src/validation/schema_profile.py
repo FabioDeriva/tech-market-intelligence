@@ -26,3 +26,18 @@ listas_de_codigos = list(codigos_por_ano.values())
 nucleo_estavel = listas_de_codigos[0].intersection(*listas_de_codigos[1:])
 
 print(nucleo_estavel)
+
+for ano, df in schemas_normalizados.items():
+    encontrados = df[df["question_code"].str.contains("Language", case=False)]
+    print(ano)
+    print(encontrados)
+    print()
+
+preview_2021 = pd.read_csv("data/raw/2021/results.csv", nrows=5)
+colunas_language = preview_2021.columns[preview_2021.columns.str.contains("language", case=False)]
+print(colunas_language.tolist())
+
+for ano in range(2020, 2026):
+    preview = pd.read_csv(f"data/raw/{ano}/results.csv", nrows=5)
+    colunas_language = preview.columns[preview.columns.str.contains("language", case=False)]
+    print(ano, colunas_language.tolist())

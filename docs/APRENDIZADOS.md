@@ -229,3 +229,5 @@ Country, DevType, OpSys, OrgSize, EdLevel, SOComm, MainBranch, Age
 **Achado crítico para o projeto:** `LanguageHaveWorkedWith` (a pergunta mais importante do projeto — linguagens usadas) **não está** no núcleo estável — o nome dessa coluna mudou em algum(ns) dos 6 anos. Vai precisar de mapeamento manual específico, ano a ano, assim como possivelmente `ConvertedCompYearly` (salário convertido — `CompTotal`, o valor bruto não convertido, está estável, mas o convertido ainda não foi checado).
 
 **Próximo passo planejado:** usar `.str.contains("Language", case=False)` (filtro de texto em coluna do pandas, equivalente a `LIKE '%Language%'` do SQL) para caçar, em cada ano, qual(is) código(s) de pergunta correspondem a linguagem — e repetir para salário.
+
+"Agente"
