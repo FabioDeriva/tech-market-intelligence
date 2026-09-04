@@ -230,4 +230,27 @@ Country, DevType, OpSys, OrgSize, EdLevel, SOComm, MainBranch, Age
 
 **Próximo passo planejado:** usar `.str.contains("Language", case=False)` (filtro de texto em coluna do pandas, equivalente a `LIKE '%Language%'` do SQL) para caçar, em cada ano, qual(is) código(s) de pergunta correspondem a linguagem — e repetir para salário.
 
-"Agente"
+---
+
+## 1.7 — 2026-08-22 — `schema.csv` não é confiável para nome de coluna real; mapeamento definitivo de linguagem
+
+**Descoberta importante de metodologia:** ao buscar "language" dentro do `schema.csv` normalizado de 2021, apareceu só **um** código genérico (`Language`) — mas o `results.csv` real daquele ano tem **duas** colunas (`LanguageHaveWorkedWith`, `LanguageWantToWorkWith`). Ou seja: **o `schema.csv` nem sempre lista cada coluna do `results.csv` individualmente** — às vezes descreve a pergunta de forma mais genérica/agrupada. Conclusão prática: para saber o nome exato de uma coluna, checar o `results.csv` real (via `pd.read_csv(..., nrows=5)`, sem carregar o arquivo inteiro) é mais confiável do que confiar no `schema.csv`.
+
+**Mapeamento real, coluna a coluna, direto do `results.csv` dos 6 anos:**
+```
+2020        LanguageDesireNextYear, LanguageWorkedWith            (2 colunas)
+2021–2023   LanguageHaveWorkedWith, LanguageWantToWorkWith        (2 colunas, estável 3 anos)
+2024        + LanguageAdmired                                     (3 colunas)
+2025        + LanguageChoice, LanguagesHaveEntry, LanguagesWantEntry  (6 colunas)
+```
+
+**Contrato canônico para "linguagem usada" (peça central do Opportunity Score/adoção):**
+
+| Ano | Coluna real |
+|---|---|
+| 2020 | `LanguageWorkedWith` |
+| 2021–2025 | `LanguageHaveWorkedWith` (nome estável 5 anos seguidos) |
+
+Só 2020 diverge; o resto do intervalo do projeto usa nome uniforme. Essa tabela é o que o script de ingestão vai usar para saber, em cada ano, qual coluna ler.
+
+**Próximo passo:** repetir a mesma caça para a coluna de salário (`ConvertedCompYearly` ou equivalente).

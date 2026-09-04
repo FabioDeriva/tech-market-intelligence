@@ -41,3 +41,8 @@ for ano in range(2020, 2026):
     preview = pd.read_csv(f"data/raw/{ano}/results.csv", nrows=5)
     colunas_language = preview.columns[preview.columns.str.contains("language", case=False)]
     print(ano, colunas_language.tolist())
+
+for ano in range(2020, 2026):
+    preview = pd.read_csv(f"data/raw/{ano}/results.csv", nrows=5)
+    colunas_salario = preview.columns[preview.columns.str.contains("comp", case=False)]
+    print(ano, colunas_salario.tolist())
